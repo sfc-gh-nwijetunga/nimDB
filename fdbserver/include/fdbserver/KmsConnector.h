@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbserver/KmsConnectorInterface.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 
@@ -37,12 +38,13 @@ public:
 	KmsConnector(const std::string& conStr) : connectorStr(conStr) {}
 	virtual ~KmsConnector() {}
 
-	virtual Future<Void> connectorCore(struct KmsConnectorInterface interf) = 0;
+	virtual Future<Void> connectorCore(struct KmsConnectorInterface interf, Reference<const AsyncVar<ServerDBInfo>> db) = 0;
 
 	std::string getConnectorStr() const { return connectorStr; }
 
 protected:
 	std::string connectorStr;
+	Reference<const AsyncVar<ServerDBInfo>> db;
 };
 
 #endif

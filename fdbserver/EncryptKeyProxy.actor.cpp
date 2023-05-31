@@ -880,7 +880,7 @@ void refreshBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnect
 	Future<Void> ignored = refreshBlobMetadataCore(ekpProxyData, kmsConnectorInf);
 }
 
-void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf, Reference<AsyncVar<ServerDBInfo>> db) {
 	if (g_network->isSimulated()) {
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>(FDB_SIM_KMS_CONNECTOR_TYPE_STR);
 	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(FDB_PREF_KMS_CONNECTOR_TYPE_STR) == 0) {
@@ -895,7 +895,7 @@ void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnec
 	    .detail("ConnectorType", ekpProxyData->kmsConnector->getConnectorStr())
 	    .detail("InfId", kmsConnectorInf.id());
 
-	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf));
+	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf, db));
 }
 
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
@@ -910,7 +910,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 
 	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
 
-	activateKmsConnector(self, kmsConnectorInf);
+	activateKmsConnector(self, kmsConnectorInf, db);
 
 	// Register a recurring task to refresh the cached Encryption keys and blob metadata.
 	// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such as:

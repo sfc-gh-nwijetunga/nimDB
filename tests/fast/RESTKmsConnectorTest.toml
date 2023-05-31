@@ -1,0 +1,9 @@
+[configuration]
+testClass = "Encryption"
+configDB = 'paxos'
+
+[[test]]
+testTitle = 'RESTKmsConnector'
+
+    [[test.workload]]
+    testName = 'RESTKmsConnectorTest'

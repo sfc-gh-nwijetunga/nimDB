@@ -162,14 +162,14 @@ class GetGenerationQuorum {
 				auto& replicas = self->seenGenerations[gen];
 				replicas.push_back(cti);
 				self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
-				// TraceEvent("ConfigTransactionGotGenerationReply")
-				// 		.detail("From", cti.getGeneration.getEndpoint().getPrimaryAddress())
-				// 		.detail("TotalRepliesReceived", self->totalRepliesReceived)
-				// 		.detail("ReplyGeneration", gen.toString())
-				// 		.detail("Replicas", replicas.size())
-				// 		.detail("Coordinators", self->ctis.size())
-				// 		.detail("MaxAgreement", self->maxAgreement)
-				// 		.detail("LastSeenLiveVersion", self->lastSeenLiveVersion);
+				TraceEvent("ConfigTransactionGotGenerationReply")
+				    .detail("From", cti.getGeneration.getEndpoint().getPrimaryAddress())
+				    .detail("TotalRepliesReceived", self->totalRepliesReceived)
+				    .detail("ReplyGeneration", gen.toString())
+				    .detail("Replicas", replicas.size())
+				    .detail("Coordinators", self->ctis.size())
+				    .detail("MaxAgreement", self->maxAgreement)
+				    .detail("LastSeenLiveVersion", self->lastSeenLiveVersion);
 				if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
 					self->result.send(gen);
 				} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
@@ -210,6 +210,8 @@ class GetGenerationQuorum {
 			try {
 				choose {
 					when(ConfigGeneration generation = wait(self->result.getFuture())) {
+						TraceEvent("PaxosConfigTransaction_GetGenerationActor")
+						    .detail("Generation", generation.toString());
 						return generation;
 					}
 					when(wait(self->actors.getResult())) {
@@ -217,6 +219,7 @@ class GetGenerationQuorum {
 					}
 				}
 			} catch (Error& e) {
+				TraceEvent("PaxosConfigTransaction_GetGenerationActor_Error").error(e);
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					CODE_PROBE(true, "Failed to reach quorum getting generation");
 					if (self->coordinatorsChangedFuture.isReady()) {
@@ -270,6 +273,9 @@ public:
 	}
 	std::vector<ConfigTransactionInterface> getReadReplicas() const {
 		ASSERT(isReady());
+		TraceEvent("PaxosConfigTransaction_GetReadReplicas")
+		    .detail("GetGenerationFuture", getGenerationFuture.get().toString())
+		    .detail("Contains", seenGenerations.find(getGenerationFuture.get()) != seenGenerations.end());
 		return seenGenerations.at(getGenerationFuture.get());
 	}
 	Optional<Version> getLastSeenLiveVersion() const { return lastSeenLiveVersion; }
@@ -287,9 +293,12 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
+		TraceEvent("PaxosConfigTransaction_Get_One").detail("Key", configKey.knobName);
 		loop {
 			try {
+				TraceEvent("PaxosConfigTransaction_Get_Two");
 				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+				TraceEvent("PaxosConfigTransaction_Get_Three").detail("Generation", generation.toString());
 				state std::vector<ConfigTransactionInterface> readReplicas =
 				    self->getGenerationQuorum.getReadReplicas();
 				std::vector<Future<Void>> fs;
@@ -300,12 +309,14 @@ class PaxosConfigTransactionImpl {
 					}
 				}
 				wait(waitForAll(fs));
+				TraceEvent("PaxosConfigTransaction_Get_Four");
 				state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
 				ConfigTransactionGetReply reply = wait(timeoutError(
 				    basicLoadBalance(configNodes,
 				                     &ConfigTransactionInterface::get,
 				                     ConfigTransactionGetRequest{ self->coordinatorsHash, generation, configKey }),
 				    CLIENT_KNOBS->GET_KNOB_TIMEOUT));
+				TraceEvent("PaxosConfigTransaction_Get_Five");
 				if (reply.value.present()) {
 					return reply.value.get().toValue();
 				} else {

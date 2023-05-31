@@ -27,7 +27,10 @@
 class RESTKmsConnector : public KmsConnector {
 public:
 	RESTKmsConnector(const std::string& conStr) : KmsConnector(conStr) {}
-	Future<Void> connectorCore(KmsConnectorInterface interf);
+	Future<Void> connectorCore(KmsConnectorInterface interf, Reference<const AsyncVar<ServerDBInfo>> db);
 };
+
+Future<Void> updateKMSUrlsKnob(Database cx, std::vector<std::string> kmsUrls);
+Future<std::unordered_set<std::string>> fetchKMSUrlsFromKnob(Database cx);
 
 #endif

@@ -51,9 +51,11 @@
 #include <queue>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include
+#include "flow/genericactors.actor.h"
 
 using namespace RESTKmsConnectorUtils;
 
@@ -227,6 +229,72 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 	return Void();
 }
 
+ACTOR Future<Void> _updateKMSUrlsKnob(Database cx, std::vector<std::string> kmsUrls) {
+	if (!kmsUrls.size()) {
+		return Void();
+	}
+
+	// Parse kms urls into comma delimted string
+	state std::string kmsUrlStr;
+	for (int i = 0; i < kmsUrls.size(); i++) {
+		kmsUrlStr += kmsUrls.at(i);
+		if (i < kmsUrls.size() - 1) {
+			kmsUrlStr += ",";
+		}
+	}
+
+	state Tuple kmsUrlKey = Tuple::makeTuple(/* config class */ nullptr, "rest_kms_connector_kms_urls"_sr);
+	state Reference<ISingleThreadTransaction> tr;
+	loop {
+		try {
+			tr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			tr->set(kmsUrlKey.pack(), StringRef(kmsUrlStr));
+			wait(tr->commit());
+			TraceEvent(SevDebug, "RESTKmsConnectorSavedUrls").detail("Urls", kmsUrlStr);
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<std::unordered_set<std::string>> _fetchKMSUrlsFromKnob(Database cx) {
+	state Tuple kmsUrlKey = Tuple::makeTuple(/* config class */ nullptr, "rest_kms_connector_kms_urls"_sr);
+	state std::unordered_set<std::string> kmsUrls;
+
+	state Reference<ISingleThreadTransaction> tr;
+	loop {
+		try {
+			tr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			TraceEvent("Nim::here1").detail("Key", kmsUrlKey.pack());
+			Optional<Value> serializedValue = wait(tr->get(kmsUrlKey.pack()));
+			TraceEvent("Nim::here2").detail("Key", kmsUrlKey.pack());
+			if (serializedValue.present()) {
+				TraceEvent("Nim::here3").detail("Key", kmsUrlKey.pack());
+				Tuple t = Tuple::unpack(serializedValue.get());
+				std::string value = t.getString(0).toString();
+				TraceEvent("Nim::here4").detail("Key", kmsUrlKey.pack()).detail("Val", t.getString(0));
+				if (value.size()) {
+					kmsUrls = parseStringToUnorderedSet<std::string>(value, ',');
+				}
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return kmsUrls;
+}
+
+Future<Void> updateKMSUrlsKnob(Database cx, std::vector<std::string> kmsUrls) {
+	return _updateKMSUrlsKnob(cx, kmsUrls);
+}
+
+Future<std::unordered_set<std::string>> fetchKMSUrlsFromKnob(Database cx) {
+	return _fetchKMSUrlsFromKnob(cx);
+}
+
 ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls refreshPersistedUrls) {
 	// KMS discovery needs to be done in two scenarios:
 	// 1) Initial cluster bootstrap - first boot.
@@ -246,6 +314,17 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPe
 	}
 
 	std::string_view mode{ SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE };
+
+	std::vector<std::string> kmsUrls;
+
+	// If the kms urls are already stored in the dynamic knob then don't go to the file
+	if (!kmsUrls.empty()) {
+		for (auto url : kmsUrls) {
+			TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("OrgUrl", url);
+			ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(url));
+		}
+		return Void();
+	}
 
 	if (mode.compare("file") == 0) {
 		wait(parseDiscoverKmsUrlFile(ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE));
@@ -1011,7 +1090,8 @@ ACTOR Future<Void> restConnectorCoreImpl(KmsConnectorInterface interf) {
 	}
 }
 
-Future<Void> RESTKmsConnector::connectorCore(KmsConnectorInterface interf) {
+Future<Void> RESTKmsConnector::connectorCore(KmsConnectorInterface interf, Reference<const AsyncVar<ServerDBInfo>> db) {
+	this->db = db;
 	return restConnectorCoreImpl(interf);
 }
 

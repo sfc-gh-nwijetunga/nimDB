@@ -255,7 +255,8 @@ ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
 	}
 }
 
-Future<Void> SimKmsConnector::connectorCore(KmsConnectorInterface interf) {
+Future<Void> SimKmsConnector::connectorCore(KmsConnectorInterface interf, Reference<const AsyncVar<ServerDBInfo>> db) {
+	this->db = db;
 	return simconnectorCoreImpl(interf);
 }
 void forceLinkSimKmsConnectorTests() {}
@@ -342,9 +343,10 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf) {
 TEST_CASE("fdbserver/SimKmsConnector") {
 	state KmsConnectorInterface inf;
 	state SimKmsConnector connector("SimKmsConnector");
+	state Reference<AsyncVar<ServerDBInfo>> dbInfo;
 
 	loop choose {
-		when(wait(connector.connectorCore(inf))) {
+		when(wait(connector.connectorCore(inf, dbInfo))) {
 			throw internal_error();
 		}
 		when(wait(testRunWorkload(inf))) {

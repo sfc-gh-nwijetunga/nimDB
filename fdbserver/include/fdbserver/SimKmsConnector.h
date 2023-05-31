@@ -28,7 +28,7 @@
 class SimKmsConnector : public KmsConnector {
 public:
 	SimKmsConnector(const std::string& conStr) : KmsConnector(conStr) {}
-	Future<Void> connectorCore(KmsConnectorInterface interf);
+	Future<Void> connectorCore(KmsConnectorInterface interf, Reference<const AsyncVar<ServerDBInfo>> db);
 };
 
 #endif
